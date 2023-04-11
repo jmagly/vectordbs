@@ -1,34 +1,34 @@
 import os
+import json
+from abc import ABC, abstractmethod
+from typing import Type
 from datastore import DataStore
 
-async def get_datastore() -> DataStore:
-    datastore = os.environ.get("DATASTORE")
-    assert datastore is not None
+class VectorDataStore(ABC, DataStore):
+    # (same as previous implementation)
 
-    match datastore:
-        case "pinecone":
-            from providers.pinecone_datastore import PineconeDataStore
+class DataStoreFactory():
+    @staticmethod
+    async def get_datastore() -> DataStore:
+        datastore = os.environ.get("DATASTORE")
+        assert datastore is not None
+        
+        with open('mapping.json', 'r') as file:
+            mapping = json.load(file)
 
-            return PineconeDataStore()
-        case "weaviate":
-            from providers.weaviate_datastore import WeaviateDataStore
+        class_path = mapping.get(datastore)
+        if class_path is not None:
+            module_name, class_name = class_path.rsplit('.', 1)
+            try:
+                datastore_module = __import__(module_name, fromlist=[class_name])
+                datastore_class: Type[VectorDataStore] = getattr(datastore_module, class_name)
 
-            return WeaviateDataStore()
-        case "milvus":
-            from providers.milvus_datastore import MilvusDataStore
+                if issubclass(datastore_class, VectorDataStore):
+                    return datastore_class()
+                else:
+                    raise TypeError(f"Class {class_name} is not a subclass of VectorDataStore")
 
-            return MilvusDataStore()
-        case "zilliz":
-            from providers.zilliz_datastore import ZillizDataStore
-
-            return ZillizDataStore()
-        case "redis":
-            from providers.redis_datastore import RedisDataStore
-
-            return await RedisDataStore.init()
-        case "qdrant":
-            from providers.qdrant_datastore import QdrantDataStore
-
-            return QdrantDataStore()
-        case _:
+            except (ModuleNotFoundError, AttributeError) as e:
+                raise ValueError(f"Unsupported vector database: {datastore}") from e
+        else:
             raise ValueError(f"Unsupported vector database: {datastore}")
